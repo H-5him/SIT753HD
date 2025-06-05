@@ -1,98 +1,97 @@
+// Load DB and modules
+require('./typeorm-db'); // If you're using TypeORM for MySQL
+
 const express = require('express');
-const router = express.Router();
+const http = require('http');
+const path = require('path');
+const session = require('express-session');
+const methodOverride = require('method-override');
+const logger = require('morgan');
+const errorHandler = require('errorhandler');
+const marked = require('marked');
+const fileUpload = require('express-fileupload');
+const st = require('st');
+const ejsEngine = require('ejs-locals');
+const cons = require('consolidate');
+const hbs = require('hbs');
+const dust = require('dustjs-linkedin');
+const dustHelpers = require('dustjs-helpers');
 
-// Placeholder user object for demo purposes
-let dummyUser = {
-  username: 'admin',
-  password: 'admin123' // Never store passwords like this in real apps
-};
+// Routes
+const routes = require('./routes');
+const routesUsers = require('./routes/users.js');
 
-// Middleware: Attach current user (for session tracking)
-exports.current_user = (req, res, next) => {
-  res.locals.user = req.session.user || null;
-  next();
-};
+const app = express();
 
-// Route: GET /
-exports.index = (req, res) => {
-  res.render('index', { title: 'Home' });
-};
+// View Engine Setup
+app.set('port', process.env.PORT || 3001);
+app.engine('ejs', ejsEngine);
+app.engine('dust', cons.dust);
+app.engine('hbs', hbs.__express);
+cons.dust.helpers = dustHelpers;
+app.set('views', path.join(__dirname, 'views'));
+app.set('view engine', 'ejs');
 
-// Route: GET /login
-exports.login = (req, res) => {
-  res.render('login', { error: null });
-};
+// Middleware
+app.use(logger('dev'));
+app.use(methodOverride());
+app.use(session({
+  secret: 'keyboard cat',
+  resave: false,
+  saveUninitialized: true,
+  name: 'connect.sid',
+  cookie: { path: '/' }
+}));
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+app.use(fileUpload());
 
-// Route: POST /login
-exports.loginHandler = (req, res) => {
-  const { username, password } = req.body;
+// Markdown rendering
+marked.setOptions({ sanitize: true });
+app.locals.marked = marked;
 
-  if (username === dummyUser.username && password === dummyUser.password) {
-    req.session.user = dummyUser;
-    res.redirect('/admin');
-  } else {
-    res.render('login', { error: 'Invalid username or password' });
-  }
-};
+// Static files
+app.use(st({ path: './public', url: '/public' }));
 
-// Route: GET /admin
-exports.admin = (req, res) => {
-  res.render('admin', { user: req.session.user });
-};
+// Development error handler
+if (app.get('env') === 'development') {
+  app.use(errorHandler());
+}
 
-// Auth check middleware
-exports.isLoggedIn = (req, res, next) => {
-  if (req.session.user) {
-    return next();
-  }
-  res.redirect('/login');
-};
+// Custom Middleware for current user session
+app.use(routes.current_user);
 
-// Route: GET /logout
-exports.logout = (req, res) => {
-  req.session.destroy(() => {
-    res.redirect('/');
-  });
-};
+// App routes
+app.get('/', routes.index);
+app.get('/login', routes.login);
+app.post('/login', routes.loginHandler);
+app.get('/admin', routes.isLoggedIn, routes.admin);
+app.get('/account_details', routes.isLoggedIn, routes.get_account_details);
+app.post('/account_details', routes.isLoggedIn, routes.save_account_details);
+app.get('/logout', routes.logout);
+app.post('/create', routes.create);
+app.get('/destroy/:id', routes.destroy);
+app.get('/edit/:id', routes.edit);
+app.post('/update/:id', routes.update);
+app.post('/import', routes.import);
+app.get('/about_new', routes.about_new);
+app.get('/chat', routes.chat.get);
+app.put('/chat', routes.chat.add);
+app.delete('/chat', routes.chat.delete);
+app.use('/users', routesUsers);
 
-// Other placeholder routes
-exports.get_account_details = (req, res) => {
-  res.render('account_details', { user: req.session.user });
-};
+// GitHub Webhook Route
+app.post('/github-webhook', express.json(), (req, res) => {
+  console.log('📬 GitHub webhook received:');
+  console.log(JSON.stringify(req.body, null, 2));
+  res.sendStatus(200);
+});
 
-exports.save_account_details = (req, res) => {
-  // Save logic (dummy)
-  res.redirect('/account_details');
-};
+// Secret token (if needed elsewhere in the app)
+const token = 'SECRET_TOKEN_f8ed84e8f41e4146403dd4a6bbcea5e418d23a9';
+console.log('token: ' + token);
 
-exports.create = (req, res) => {
-  // Create logic
-  res.send('Created!');
-};
-
-exports.destroy = (req, res) => {
-  res.send(`Destroyed item with ID ${req.params.id}`);
-};
-
-exports.edit = (req, res) => {
-  res.send(`Edit item with ID ${req.params.id}`);
-};
-
-exports.update = (req, res) => {
-  res.send(`Updated item with ID ${req.params.id}`);
-};
-
-exports.import = (req, res) => {
-  res.send('Import complete');
-};
-
-exports.about_new = (req, res) => {
-  res.render('about_new');
-};
-
-// Chat demo logic
-exports.chat = {
-  get: (req, res) => res.send('Chat GET'),
-  add: (req, res) => res.send('Chat ADD'),
-  delete: (req, res) => res.send('Chat DELETE')
-};
+// Start server
+http.createServer(app).listen(app.get('port'), () => {
+  console.log('✅ Express server listening on port ' + app.get('port'));
+});
